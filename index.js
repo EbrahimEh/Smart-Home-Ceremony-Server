@@ -138,24 +138,21 @@ app.get('/api/services', async (req, res) => {
     }
 });
 
-app.get('/api/decorators/top', async (req, res) => {
+
+
+
+app.post('/api/bookings', async (req, res) => {
     try {
-        const database = client.db("smart-home-db");
-        const decorators = await database.collection("decorators")
-            .find({})
-            .toArray();
-        
-        const topDecorators = decorators
-            .sort((a, b) => b.rating - a.rating)
-            .slice(0, 4);
-        
-        res.json(topDecorators);
-    } catch (error) {
-        console.error('Error fetching decorators:', error);
-        res.status(500).json({ 
-            error: 'Failed to fetch decorators',
-            message: error.message 
+        const bookingData = req.body;
+     
+        res.json({ 
+            success: true, 
+            message: 'Booking endpoint ready',
+            data: bookingData 
         });
+    } catch (error) {
+        console.error('Error creating booking:', error);
+        res.status(500).json({ error: 'Failed to create booking' });
     }
 });
 
