@@ -138,30 +138,28 @@ app.get('/api/services', async (req, res) => {
     }
 });
 
-
-
-
-app.post('/api/bookings', async (req, res) => {
+app.get('/api/decorators/top', async (req, res) => {
     try {
-        const bookingData = req.body;
-     
-        res.json({ 
-            success: true, 
-            message: 'Booking endpoint ready',
-            data: bookingData 
-        });
+        const database = client.db("smart-home-db");
+        const decorators = await database.collection("decorators")
+            .find({})
+            .toArray();
+        
+        const topDecorators = decorators
+            .sort((a, b) => b.rating - a.rating)
+            .slice(0, 4);
+        
+        res.json(topDecorators);
     } catch (error) {
-        console.error('Error creating booking:', error);
-        res.status(500).json({ error: 'Failed to create booking' });
+        console.error('Error fetching decorators:', error);
+        res.status(500).json({ 
+            error: 'Failed to fetch decorators',
+            message: error.message 
+        });
     }
 });
 
-app.use((req, res) => {
-    res.status(404).json({ 
-        success: false, 
-        error: 'Route not found' 
-    });
-});
+
 
 app.listen(port, () => {
     console.log(`🚀 Server running on http://localhost:${port}`);
