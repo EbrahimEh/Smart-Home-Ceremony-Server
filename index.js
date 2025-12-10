@@ -22,7 +22,7 @@ const client = new MongoClient(uri, {
 let usersCollection;
 let servicesCollection;
 let decoratorsCollection;
-
+let bookingsCollection;
 
 async function run() {
     try {
@@ -33,6 +33,7 @@ async function run() {
         usersCollection = database.collection("users");
         servicesCollection = database.collection("Dynamic_Services");
         decoratorsCollection = database.collection("decorators");
+        bookingsCollection = database.collection("bookings");
         
         console.log("📁 Database collections ready");
         
@@ -47,6 +48,90 @@ app.get('/', (req, res) => {
         message: 'Smart Home Server is Running!',
         status: 'OK'
     });
+});
+
+app.get('/api/services/:id', async (req, res) => {
+    try {
+        const serviceId = req.params.id;
+        console.log('🔍 Fetching service with ID:', serviceId);
+        console.log('ID type:', typeof serviceId);
+        console.log('ID length:', serviceId.length);
+
+        let service = await servicesCollection.findOne({
+            _id: serviceId
+        });
+        
+        console.log('Service found with string ID:', service ? 'Yes' : 'No');
+
+        if (!service && ObjectId.isValid(serviceId)) {
+            console.log('Trying ObjectId conversion...');
+            service = await servicesCollection.findOne({
+                _id: new ObjectId(serviceId)
+            });
+            console.log('Service found with ObjectId:', service ? 'Yes' : 'No');
+        }
+        
+        if (!service) {
+            console.log('❌ Service not found');
+            const allServices = await servicesCollection.find({}, { projection: { _id: 1, service_name: 1 } }).toArray();
+            console.log('Available services:', allServices.map(s => ({ id: s._id, name: s.service_name })));
+            
+            return res.status(404).json({ 
+                error: 'Service not found',
+                requestedId: serviceId,
+                availableServices: allServices.map(s => s._id)
+            });
+        }
+        
+        console.log('✅ Service found:', service.service_name);
+        res.json(service);
+        
+    } catch (error) {
+        console.error('❌ Error fetching service:', error);
+        res.status(500).json({ 
+            error: 'Failed to fetch service', 
+            details: error.message 
+        });
+    }
+});
+
+app.get('/api/services', async (req, res) => {
+    try {
+        console.log('📋 Fetching all services...');
+        const services = await servicesCollection.find({}).toArray();
+        console.log(`✅ Found ${services.length} services`);
+     
+        services.forEach(service => {
+            console.log(`Service: ${service.service_name}, ID: ${service._id}, Type: ${typeof service._id}`);
+        });
+        
+        res.json(services);
+    } catch (error) {
+        console.error('❌ Error fetching services:', error);
+        res.status(500).json({ error: 'Failed to fetch services' });
+    }
+});
+
+app.get('/api/debug/services', async (req, res) => {
+    try {
+        const services = await servicesCollection.find({}).toArray();
+        
+        const servicesWithTypes = services.map(service => ({
+            _id: service._id,
+            _id_type: typeof service._id,
+            _id_value: service._id.toString(),
+            service_name: service.service_name,
+            category: service.category
+        }));
+        
+        res.json({
+            success: true,
+            count: services.length,
+            services: servicesWithTypes
+        });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
 });
 
 app.get('/test', async (req, res) => {
@@ -128,26 +213,13 @@ app.get('/users', async (req, res) => {
     }
 });
 
-app.get('/api/services', async (req, res) => {
-    try {
-        const services = await servicesCollection.find({}).toArray();
-        res.json(services);
-    } catch (error) {
-        console.error('Error fetching services:', error);
-        res.status(500).json({ error: 'Failed to fetch services' });
-    }
-});
-
 app.get('/api/decorators/top', async (req, res) => {
     try {
-        const database = client.db("smart-home-db");
-        const decorators = await database.collection("decorators")
+        const topDecorators = await decoratorsCollection
             .find({})
+            .sort({ rating: -1 })
+            .limit(4)
             .toArray();
-        
-        const topDecorators = decorators
-            .sort((a, b) => b.rating - a.rating)
-            .slice(0, 4);
         
         res.json(topDecorators);
     } catch (error) {
@@ -159,7 +231,253 @@ app.get('/api/decorators/top', async (req, res) => {
     }
 });
 
+app.get('/api/services/categories', async (req, res) => {
+    try {
+        const categories = await servicesCollection.distinct("category");
+        res.json(categories);
+    } catch (error) {
+        console.error('Error fetching categories:', error);
+        res.status(500).json({ error: 'Failed to fetch categories' });
+    }
+});
 
+app.post('/api/bookings', async (req, res) => {
+    try {
+        const bookingData = req.body;
+        console.log('Booking data received:', bookingData);
+    
+        const requiredFields = ['serviceId', 'userId', 'date', 'location', 'contactNumber'];
+        for (const field of requiredFields) {
+            if (!bookingData[field]) {
+                return res.status(400).json({
+                    success: false,
+                    error: `Missing required field: ${field}`
+                });
+            }
+        }
+        
+        let service = await servicesCollection.findOne({
+            _id: bookingData.serviceId
+        });
+        
+        if (!service && ObjectId.isValid(bookingData.serviceId)) {
+            service = await servicesCollection.findOne({
+                _id: new ObjectId(bookingData.serviceId)
+            });
+        }
+        
+        if (!service) {
+            return res.status(404).json({
+                success: false,
+                error: 'Service not found'
+            });
+        }
+        
+        const booking = {
+            ...bookingData,
+            serviceName: service.service_name,
+            serviceCost: service.cost,
+            serviceCategory: service.category,
+            serviceUnit: service.unit,
+            status: 'pending',
+            paymentStatus: 'unpaid',
+            createdAt: new Date(),
+            updatedAt: new Date(),
+            bookingCode: `BK${Date.now()}${Math.floor(Math.random() * 1000)}`
+        };
+        
+        const result = await bookingsCollection.insertOne(booking);
+        
+        res.json({
+            success: true,
+            message: 'Booking created successfully',
+            bookingId: result.insertedId,
+            bookingCode: booking.bookingCode,
+            data: {
+                ...booking,
+                _id: result.insertedId
+            }
+        });
+        
+    } catch (error) {
+        console.error('Error creating booking:', error);
+        res.status(500).json({ 
+            success: false, 
+            error: 'Failed to create booking',
+            details: error.message 
+        });
+    }
+});
+
+app.get('/api/bookings/user/:userId', async (req, res) => {
+    try {
+        const userId = req.params.userId;
+        
+        const bookings = await bookingsCollection.find({
+            userId: userId
+        }).sort({ createdAt: -1 }).toArray();
+        
+        res.json({
+            success: true,
+            count: bookings.length,
+            data: bookings
+        });
+        
+    } catch (error) {
+        console.error('Error fetching user bookings:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Failed to fetch bookings'
+        });
+    }
+});
+
+app.get('/api/bookings/:id', async (req, res) => {
+    try {
+        const bookingId = req.params.id;
+        
+        let booking = await bookingsCollection.findOne({
+            _id: bookingId
+        });
+        
+        if (!booking && ObjectId.isValid(bookingId)) {
+            booking = await bookingsCollection.findOne({
+                _id: new ObjectId(bookingId)
+            });
+        }
+        
+        if (!booking) {
+            return res.status(404).json({
+                success: false,
+                error: 'Booking not found'
+            });
+        }
+        
+        res.json({
+            success: true,
+            data: booking
+        });
+        
+    } catch (error) {
+        console.error('Error fetching booking:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Failed to fetch booking'
+        });
+    }
+});
+
+app.patch('/api/bookings/:id/status', async (req, res) => {
+    try {
+        const bookingId = req.params.id;
+        const { status } = req.body;
+        
+        const validStatuses = ['pending', 'confirmed', 'assigned', 'in-progress', 'completed', 'cancelled'];
+        
+        if (!validStatuses.includes(status)) {
+            return res.status(400).json({
+                success: false,
+                error: 'Invalid status'
+            });
+        }
+        
+        let result;
+        result = await bookingsCollection.updateOne(
+            { _id: bookingId },
+            { 
+                $set: { 
+                    status: status,
+                    updatedAt: new Date()
+                }
+            }
+        );
+        if (result.modifiedCount === 0 && ObjectId.isValid(bookingId)) {
+            result = await bookingsCollection.updateOne(
+                { _id: new ObjectId(bookingId) },
+                { 
+                    $set: { 
+                        status: status,
+                        updatedAt: new Date()
+                    }
+                }
+            );
+        }
+        
+        if (result.modifiedCount === 0) {
+            return res.status(404).json({
+                success: false,
+                error: 'Booking not found or status unchanged'
+            });
+        }
+        
+        res.json({
+            success: true,
+            message: `Booking status updated to ${status}`
+        });
+        
+    } catch (error) {
+        console.error('Error updating booking status:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Failed to update booking status'
+        });
+    }
+});
+
+app.delete('/api/bookings/:id', async (req, res) => {
+    try {
+        const bookingId = req.params.id;
+        
+        let result;
+        result = await bookingsCollection.updateOne(
+            { _id: bookingId },
+            { 
+                $set: { 
+                    status: 'cancelled',
+                    updatedAt: new Date()
+                }
+            }
+        );
+        
+        if (result.modifiedCount === 0 && ObjectId.isValid(bookingId)) {
+            result = await bookingsCollection.updateOne(
+                { _id: new ObjectId(bookingId) },
+                { 
+                    $set: { 
+                        status: 'cancelled',
+                        updatedAt: new Date()
+                    }
+                }
+            );
+        }
+        
+        if (result.modifiedCount === 0) {
+            return res.status(404).json({
+                success: false,
+                error: 'Booking not found'
+            });
+        }
+        
+        res.json({
+            success: true,
+            message: 'Booking cancelled successfully'
+        });
+        
+    } catch (error) {
+        console.error('Error cancelling booking:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Failed to cancel booking'
+        });
+    }
+});
+
+app.use((req, res) => {
+    res.status(404).json({ 
+        success: false, 
+        error: 'Route not found' 
+    });
+});
 
 app.listen(port, () => {
     console.log(`🚀 Server running on http://localhost:${port}`);
