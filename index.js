@@ -472,6 +472,227 @@ app.delete('/api/bookings/:id', async (req, res) => {
     }
 });
 
+
+
+app.get('/api/payment-test', (req, res) => {
+    res.json({
+        success: true,
+        message: 'Payment API is working',
+        timestamp: new Date().toISOString()
+    });
+});
+
+
+app.patch('/api/bookings/:id/payment', async (req, res) => {
+    try {
+        const bookingId = req.params.id;
+        const { paymentStatus, paymentMethod, transactionId } = req.body;
+        
+        console.log('Updating payment for booking:', bookingId);
+        console.log('Payment data:', req.body);
+        
+        const validPaymentStatuses = ['unpaid', 'pending', 'paid', 'failed', 'refunded'];
+        
+        if (!validPaymentStatuses.includes(paymentStatus)) {
+            return res.status(400).json({
+                success: false,
+                error: 'Invalid payment status'
+            });
+        }
+        
+        let result;
+        result = await bookingsCollection.updateOne(
+            { _id: bookingId },
+            { 
+                $set: { 
+                    paymentStatus: paymentStatus,
+                    paymentMethod: paymentMethod,
+                    transactionId: transactionId,
+                    updatedAt: new Date()
+                }
+            }
+        );
+        
+        if (result.modifiedCount === 0 && ObjectId.isValid(bookingId)) {
+            result = await bookingsCollection.updateOne(
+                { _id: new ObjectId(bookingId) },
+                { 
+                    $set: { 
+                        paymentStatus: paymentStatus,
+                        paymentMethod: paymentMethod,
+                        transactionId: transactionId,
+                        updatedAt: new Date()
+                    }
+                }
+            );
+        }
+        
+        if (result.modifiedCount === 0) {
+            return res.status(404).json({
+                success: false,
+                error: 'Booking not found'
+            });
+        }
+        
+        res.json({
+            success: true,
+            message: `Payment status updated to ${paymentStatus}`
+        });
+        
+    } catch (error) {
+        console.error('Error updating payment status:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Failed to update payment status'
+        });
+    }
+});
+
+app.post('/api/bookings/:id/complete-payment', async (req, res) => {
+    try {
+        const bookingId = req.params.id;
+        const { paymentMethod, transactionId } = req.body;
+        
+        console.log('Completing payment for booking:', bookingId);
+        
+        let result;
+        result = await bookingsCollection.updateOne(
+            { _id: bookingId },
+            { 
+                $set: { 
+                    paymentStatus: 'paid',
+                    status: 'confirmed',
+                    paymentMethod: paymentMethod || 'manual',
+                    transactionId: transactionId || `MANUAL_${Date.now()}`,
+                    updatedAt: new Date()
+                }
+            }
+        );
+        
+        if (result.modifiedCount === 0 && ObjectId.isValid(bookingId)) {
+            result = await bookingsCollection.updateOne(
+                { _id: new ObjectId(bookingId) },
+                { 
+                    $set: { 
+                        paymentStatus: 'paid',
+                        status: 'confirmed',
+                        paymentMethod: paymentMethod || 'manual',
+                        transactionId: transactionId || `MANUAL_${Date.now()}`,
+                        updatedAt: new Date()
+                    }
+                }
+            );
+        }
+        
+        if (result.modifiedCount === 0) {
+            return res.status(404).json({
+                success: false,
+                error: 'Booking not found'
+            });
+        }
+        
+        res.json({
+            success: true,
+            message: 'Payment completed successfully'
+        });
+        
+    } catch (error) {
+        console.error('Error completing payment:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Failed to complete payment'
+        });
+    }
+});
+
+app.get('/api/user/:userId/payments', async (req, res) => {
+    try {
+        const userId = req.params.userId;
+        
+        const bookings = await bookingsCollection.find({
+            userId: userId,
+            paymentStatus: 'paid'
+        }).sort({ updatedAt: -1 }).toArray();
+        
+        res.json({
+            success: true,
+            count: bookings.length,
+            data: bookings
+        });
+        
+    } catch (error) {
+        console.error('Error fetching user payments:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Failed to fetch payments'
+        });
+    }
+});
+
+app.post('/api/simulate-payment', async (req, res) => {
+    try {
+        const { bookingId } = req.body;
+        
+        if (!bookingId) {
+            return res.status(400).json({
+                success: false,
+                error: 'bookingId is required'
+            });
+        }
+        
+        console.log('Simulating payment for booking:', bookingId);
+        
+        let result;
+        result = await bookingsCollection.updateOne(
+            { _id: bookingId },
+            { 
+                $set: { 
+                    paymentStatus: 'paid',
+                    status: 'confirmed',
+                    paymentMethod: 'test',
+                    transactionId: `TEST_${Date.now()}`,
+                    updatedAt: new Date()
+                }
+            }
+        );
+        
+        if (result.modifiedCount === 0 && ObjectId.isValid(bookingId)) {
+            result = await bookingsCollection.updateOne(
+                { _id: new ObjectId(bookingId) },
+                { 
+                    $set: { 
+                        paymentStatus: 'paid',
+                        status: 'confirmed',
+                        paymentMethod: 'test',
+                        transactionId: `TEST_${Date.now()}`,
+                        updatedAt: new Date()
+                    }
+                }
+            );
+        }
+        
+        if (result.modifiedCount === 0) {
+            return res.status(404).json({
+                success: false,
+                error: 'Booking not found'
+            });
+        }
+        
+        res.json({
+            success: true,
+            message: 'Payment simulated successfully',
+            transactionId: `TEST_${Date.now()}`
+        });
+        
+    } catch (error) {
+        console.error('Error simulating payment:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Failed to simulate payment'
+        });
+    }
+});
+
 app.use((req, res) => {
     res.status(404).json({ 
         success: false, 
