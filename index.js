@@ -50,50 +50,82 @@ app.get('/', (req, res) => {
     });
 });
 
+
 app.get('/api/services/:id', async (req, res) => {
     try {
         const serviceId = req.params.id;
+        
         console.log('🔍 Fetching service with ID:', serviceId);
         console.log('ID type:', typeof serviceId);
         console.log('ID length:', serviceId.length);
-
-        let service = await servicesCollection.findOne({
-            _id: serviceId
-        });
         
-        console.log('Service found with string ID:', service ? 'Yes' : 'No');
-
-        if (!service && ObjectId.isValid(serviceId)) {
-            console.log('Trying ObjectId conversion...');
-            service = await servicesCollection.findOne({
-                _id: new ObjectId(serviceId)
-            });
-            console.log('Service found with ObjectId:', service ? 'Yes' : 'No');
+        let service;
+        
+        
+        if (ObjectId.isValid(serviceId)) {
+           
+            if (serviceId.length === 24) {
+                console.log('Trying as ObjectId...');
+                service = await servicesCollection.findOne({
+                    _id: new ObjectId(serviceId)
+                });
+                console.log('Found with ObjectId:', service ? 'Yes' : 'No');
+            }
         }
         
+
+        if (!service) {
+            console.log('Trying as string ID...');
+            service = await servicesCollection.findOne({
+                _id: serviceId
+            });
+            console.log('Found with string ID:', service ? 'Yes' : 'No');
+        }
+        
+
         if (!service) {
             console.log('❌ Service not found');
-            const allServices = await servicesCollection.find({}, { projection: { _id: 1, service_name: 1 } }).toArray();
-            console.log('Available services:', allServices.map(s => ({ id: s._id, name: s.service_name })));
+            
+
+            const sampleServices = await servicesCollection.find({})
+                .limit(5)
+                .project({ _id: 1, service_name: 1 })
+                .toArray();
+            
+            console.log('Sample services in DB:', sampleServices);
             
             return res.status(404).json({ 
                 error: 'Service not found',
                 requestedId: serviceId,
-                availableServices: allServices.map(s => s._id)
+                requestedIdType: typeof serviceId,
+                sampleServices: sampleServices.map(s => ({
+                    id: s._id,
+                    idType: s._id.constructor.name,
+                    name: s.service_name
+                }))
             });
         }
         
         console.log('✅ Service found:', service.service_name);
-        res.json(service);
+        
+
+        const responseService = { ...service };
+        if (responseService._id && responseService._id.toString) {
+            responseService._id = responseService._id.toString();
+        }
+        
+        res.json(responseService);
         
     } catch (error) {
         console.error('❌ Error fetching service:', error);
         res.status(500).json({ 
             error: 'Failed to fetch service', 
-            details: error.message 
+            details: error.message,
+            stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
         });
     }
 });
+
 
 app.get('/api/services', async (req, res) => {
     try {
@@ -101,38 +133,19 @@ app.get('/api/services', async (req, res) => {
         const services = await servicesCollection.find({}).toArray();
         console.log(`✅ Found ${services.length} services`);
      
-        services.forEach(service => {
-            console.log(`Service: ${service.service_name}, ID: ${service._id}, Type: ${typeof service._id}`);
-        });
+
+        const formattedServices = services.map(service => ({
+            ...service,
+            _id: service._id.toString ? service._id.toString() : service._id
+        }));
         
-        res.json(services);
+        res.json(formattedServices);
     } catch (error) {
         console.error('❌ Error fetching services:', error);
         res.status(500).json({ error: 'Failed to fetch services' });
     }
 });
 
-app.get('/api/debug/services', async (req, res) => {
-    try {
-        const services = await servicesCollection.find({}).toArray();
-        
-        const servicesWithTypes = services.map(service => ({
-            _id: service._id,
-            _id_type: typeof service._id,
-            _id_value: service._id.toString(),
-            service_name: service.service_name,
-            category: service.category
-        }));
-        
-        res.json({
-            success: true,
-            count: services.length,
-            services: servicesWithTypes
-        });
-    } catch (error) {
-        res.status(500).json({ error: error.message });
-    }
-});
 
 app.get('/test', async (req, res) => {
     try {
@@ -213,6 +226,7 @@ app.get('/users', async (req, res) => {
     }
 });
 
+// Decorators
 app.get('/api/decorators/top', async (req, res) => {
     try {
         const topDecorators = await decoratorsCollection
@@ -231,6 +245,7 @@ app.get('/api/decorators/top', async (req, res) => {
     }
 });
 
+
 app.get('/api/services/categories', async (req, res) => {
     try {
         const categories = await servicesCollection.distinct("category");
@@ -241,6 +256,7 @@ app.get('/api/services/categories', async (req, res) => {
     }
 });
 
+// Bookings
 app.post('/api/bookings', async (req, res) => {
     try {
         const bookingData = req.body;
@@ -256,6 +272,7 @@ app.post('/api/bookings', async (req, res) => {
             }
         }
         
+
         let service = await servicesCollection.findOne({
             _id: bookingData.serviceId
         });
@@ -309,6 +326,7 @@ app.post('/api/bookings', async (req, res) => {
     }
 });
 
+
 app.get('/api/bookings/user/:userId', async (req, res) => {
     try {
         const userId = req.params.userId;
@@ -317,10 +335,16 @@ app.get('/api/bookings/user/:userId', async (req, res) => {
             userId: userId
         }).sort({ createdAt: -1 }).toArray();
         
+    
+        const formattedBookings = bookings.map(booking => ({
+            ...booking,
+            _id: booking._id.toString ? booking._id.toString() : booking._id
+        }));
+        
         res.json({
             success: true,
-            count: bookings.length,
-            data: bookings
+            count: formattedBookings.length,
+            data: formattedBookings
         });
         
     } catch (error) {
@@ -351,6 +375,11 @@ app.get('/api/bookings/:id', async (req, res) => {
                 success: false,
                 error: 'Booking not found'
             });
+        }
+        
+
+        if (booking._id && booking._id.toString) {
+            booking._id = booking._id.toString();
         }
         
         res.json({
@@ -391,6 +420,7 @@ app.patch('/api/bookings/:id/status', async (req, res) => {
                 }
             }
         );
+        
         if (result.modifiedCount === 0 && ObjectId.isValid(bookingId)) {
             result = await bookingsCollection.updateOne(
                 { _id: new ObjectId(bookingId) },
@@ -423,6 +453,7 @@ app.patch('/api/bookings/:id/status', async (req, res) => {
         });
     }
 });
+
 
 app.delete('/api/bookings/:id', async (req, res) => {
     try {
@@ -472,8 +503,6 @@ app.delete('/api/bookings/:id', async (req, res) => {
     }
 });
 
-
-
 app.get('/api/payment-test', (req, res) => {
     res.json({
         success: true,
@@ -482,14 +511,12 @@ app.get('/api/payment-test', (req, res) => {
     });
 });
 
-
 app.patch('/api/bookings/:id/payment', async (req, res) => {
     try {
         const bookingId = req.params.id;
         const { paymentStatus, paymentMethod, transactionId } = req.body;
         
         console.log('Updating payment for booking:', bookingId);
-        console.log('Payment data:', req.body);
         
         const validPaymentStatuses = ['unpaid', 'pending', 'paid', 'failed', 'refunded'];
         
@@ -614,10 +641,16 @@ app.get('/api/user/:userId/payments', async (req, res) => {
             paymentStatus: 'paid'
         }).sort({ updatedAt: -1 }).toArray();
         
+       
+        const formattedBookings = bookings.map(booking => ({
+            ...booking,
+            _id: booking._id.toString ? booking._id.toString() : booking._id
+        }));
+        
         res.json({
             success: true,
-            count: bookings.length,
-            data: bookings
+            count: formattedBookings.length,
+            data: formattedBookings
         });
         
     } catch (error) {
@@ -628,6 +661,7 @@ app.get('/api/user/:userId/payments', async (req, res) => {
         });
     }
 });
+
 
 app.post('/api/simulate-payment', async (req, res) => {
     try {
@@ -692,7 +726,7 @@ app.post('/api/simulate-payment', async (req, res) => {
         });
     }
 });
-//
+
 app.use((req, res) => {
     res.status(404).json({ 
         success: false, 
@@ -700,6 +734,10 @@ app.use((req, res) => {
     });
 });
 
+
 app.listen(port, () => {
     console.log(`🚀 Server running on http://localhost:${port}`);
 });
+
+
+module.exports = app;
